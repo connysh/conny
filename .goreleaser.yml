@@ -18,6 +18,7 @@ builds:
 dockers_v2:
   - images:
       - ghcr.io/connysh/conny
+      - connysh/conny
     tags:
       - "{{ .Tag }}"
       - latest
