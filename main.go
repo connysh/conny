@@ -88,6 +88,7 @@ func main() {
 		vanguard.WithCodec(func(res vanguard.TypeResolver) vanguard.Codec {
 			codec := vanguard.NewJSONCodec(res)
 			codec.MarshalOptions.UseProtoNames = true
+			codec.UnmarshalOptions.DiscardUnknown = true
 			return codec
 		}),
 	)
@@ -151,6 +152,7 @@ func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, prot
 				vanguard.WithTargetProtocols(protocol),
 				vanguard.WithTargetCodecs("proto", "json"),
 				vanguard.WithTypeResolver(types),
+				vanguard.WithRESTUnmarshalOptions(vanguard.RESTUnmarshalOptions{DiscardUnknownQueryParams: true}),
 			)
 			services = append(services, svc)
 			slog.Info("registered service", "name", sd.FullName())
