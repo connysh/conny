@@ -1,6 +1,6 @@
 # Conny
 
-A tiny [ConnectRPC](https://connectrpc.com) gateway. Translates REST, gRPC, and gRPC-Web requests into the Connect protocol using a protobuf descriptor.
+A tiny [ConnectRPC](https://connectrpc.com) gateway. Translates REST, gRPC, and gRPC-Web requests into the Connect, gRPC, or gRPC-Web protocols using a protobuf descriptor. 
 
 ## Install
 
@@ -33,9 +33,10 @@ conny -d descriptor.pb http://localhost:8080
 
 | Flag | Env | Default | Description |
 |------|-----|---------|-------------|
-| `-d` | `DESCRIPTOR` | | Path to proto descriptor file |
-| `-p` | `PORT` | `8888` | Listen port |
-| `-v` | | | Print version |
+| `-d, --descriptor` | `DESCRIPTOR` | | Path to proto descriptor file |
+| `-p, --port`       | `PORT`       | `8888` | Listen port |
+| `--protocol`       | `PROTOCOL`   | `connect` | Upstream protocol (`connect`, `grpc`, `grpcweb`) |
+| `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
 
