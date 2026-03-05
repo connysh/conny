@@ -21,16 +21,28 @@ import (
 var Version = "dev"
 
 func main() {
-	version := flag.Bool("v", false, "print version")
-	port := flag.String("p", envOrDefault("PORT", "8888"), "listen port")
-	descriptor := flag.String("d", os.Getenv("DESCRIPTOR"), "path to proto descriptor file")
+	var version bool
+	flag.BoolVar(&version, "v", false, "print version")
+	flag.BoolVar(&version, "version", false, "print version")
+
+	var port string
+	flag.StringVar(&port, "p", envOrDefault("PORT", "8888"), "listen port")
+	flag.StringVar(&port, "port", envOrDefault("PORT", "8888"), "listen port")
+
+	var descriptor string
+	flag.StringVar(&descriptor, "d", os.Getenv("DESCRIPTOR"), "path to proto descriptor file")
+	flag.StringVar(&descriptor, "descriptor", os.Getenv("DESCRIPTOR"), "path to proto descriptor file")
+
+	var protocol string
+	flag.StringVar(&protocol, "protocol", envOrDefault("PROTOCOL", "connect"), "upstream protocol (connect, grpc, grpcweb)")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	if *version {
+	if version {
 		fmt.Println(Version)
 		os.Exit(0)
 	}
@@ -39,7 +51,7 @@ func main() {
 	if rawURL == "" {
 		rawURL = os.Getenv("URL")
 	}
-	if rawURL == "" || *descriptor == "" {
+	if rawURL == "" || descriptor == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -48,13 +60,25 @@ func main() {
 		log.Fatalf("invalid URL: %v", err)
 	}
 
-	fds, err := loadDescriptorSet(*descriptor)
+	var vanguardProto vanguard.Protocol
+	switch protocol {
+	case "connect":
+		vanguardProto = vanguard.ProtocolConnect
+	case "grpc":
+		vanguardProto = vanguard.ProtocolGRPC
+	case "grpcweb", "grpc-web":
+		vanguardProto = vanguard.ProtocolGRPCWeb
+	default:
+		log.Fatalf("invalid protocol: %s (must be connect, grpc, or grpcweb)", protocol)
+	}
+
+	fds, err := loadDescriptorSet(descriptor)
 	if err != nil {
 		log.Fatalf("failed to load descriptor set: %v", err)
 	}
 	slog.Info("loaded descriptor set", "files", len(fds.GetFile()))
 
-	services, err := buildServices(fds, targetURL)
+	services, err := buildServices(fds, targetURL, vanguardProto)
 	if err != nil {
 		log.Fatalf("failed to build services: %v", err)
 	}
@@ -71,8 +95,8 @@ func main() {
 		log.Fatalf("failed to create transcoder: %v", err)
 	}
 
-	addr := fmt.Sprintf(":%s", *port)
-	slog.Info("starting gateway", "addr", addr, "target", rawURL)
+	addr := fmt.Sprintf(":%s", port)
+	slog.Info("starting gateway", "addr", addr, "target", rawURL, "protocol", protocol)
 
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
@@ -107,7 +131,7 @@ func loadDescriptorSet(path string) (*descriptorpb.FileDescriptorSet, error) {
 	return fds, nil
 }
 
-func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL) ([]*vanguard.Service, error) {
+func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol) ([]*vanguard.Service, error) {
 	files, err := protodesc.NewFiles(fds)
 	if err != nil {
 		return nil, fmt.Errorf("creating file registry: %w", err)
@@ -124,7 +148,7 @@ func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL) ([]*
 			svc := vanguard.NewServiceWithSchema(
 				sd,
 				proxy,
-				vanguard.WithTargetProtocols(vanguard.ProtocolConnect),
+				vanguard.WithTargetProtocols(protocol),
 				vanguard.WithTargetCodecs("proto", "json"),
 				vanguard.WithTypeResolver(types),
 			)
