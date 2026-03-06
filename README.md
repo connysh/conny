@@ -36,6 +36,7 @@ conny -d descriptor.pb http://localhost:8080
 | `-d, --descriptor` | `DESCRIPTOR` | | Path to proto descriptor file |
 | `-p, --port`       | `PORT`       | `8888` | Listen port |
 | `--protocol`       | `PROTOCOL`   | `connect` | Upstream protocol (`connect`, `grpc`, `grpcweb`) |
+| `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.

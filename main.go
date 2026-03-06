@@ -9,7 +9,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 
+	"connectrpc.com/grpcreflect"
 	"connectrpc.com/vanguard"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -47,11 +49,16 @@ func main() {
 	defaultProtocol := envOrDefault("PROTOCOL", "connect")
 	flag.StringVar(&protocol, "protocol", defaultProtocol, usageProtocol)
 
+	var enableReflection bool
+	defaultReflection := envOrDefaultBool("REFLECTION", false)
+	flag.BoolVar(&enableReflection, "reflection", defaultReflection, usageReflection)
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
 		fmt.Fprintf(os.Stderr, "  -d, --descriptor string\n        %s\n", usageDescriptor)
 		fmt.Fprintf(os.Stderr, "  -p, --port string\n        %s (default %q)\n", usagePort, defaultPort)
 		fmt.Fprintf(os.Stderr, "      --protocol string\n        %s (default %q)\n", usageProtocol, defaultProtocol)
+		fmt.Fprintf(os.Stderr, "      --reflection\n        %s (default %t)\n", usageReflection, defaultReflection)
 		fmt.Fprintf(os.Stderr, "  -v, --version\n        %s\n", usageVersion)
 	}
 	flag.Parse()
@@ -92,7 +99,7 @@ func main() {
 	}
 	slog.Info("loaded descriptor set", "files", len(fds.GetFile()))
 
-	services, err := buildServices(fds, targetURL, vanguardProto)
+	services, err := buildServices(fds, targetURL, vanguardProto, enableReflection)
 	if err != nil {
 		log.Fatalf("failed to build services: %v", err)
 	}
@@ -134,6 +141,16 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+func envOrDefaultBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		parsed, err := strconv.ParseBool(v)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
 func loadDescriptorSet(path string) (*descriptorpb.FileDescriptorSet, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -146,7 +163,7 @@ func loadDescriptorSet(path string) (*descriptorpb.FileDescriptorSet, error) {
 	return fds, nil
 }
 
-func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol) ([]*vanguard.Service, error) {
+func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol, enableReflection bool) ([]*vanguard.Service, error) {
 	files, err := protodesc.NewFiles(fds)
 	if err != nil {
 		return nil, fmt.Errorf("creating file registry: %w", err)
@@ -156,10 +173,13 @@ func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, prot
 	proxy := newReverseProxy(targetURL)
 
 	var services []*vanguard.Service
+	var serviceNames []string
+
 	files.RangeFiles(func(fd protoreflect.FileDescriptor) bool {
 		sds := fd.Services()
 		for i := range sds.Len() {
 			sd := sds.Get(i)
+			serviceNames = append(serviceNames, string(sd.FullName()))
 			svc := vanguard.NewServiceWithSchema(
 				sd,
 				proxy,
@@ -176,6 +196,18 @@ func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, prot
 
 	if len(services) == 0 {
 		return nil, fmt.Errorf("no services found in descriptor set")
+	}
+
+	if enableReflection {
+		reflector := grpcreflect.NewStaticReflector(serviceNames...)
+		
+		v1Path, v1Handler := grpcreflect.NewHandlerV1(reflector)
+		services = append(services, vanguard.NewService(v1Path, v1Handler))
+		slog.Info("registered reflection service", "version", "v1", "path", v1Path)
+
+		v1AlphaPath, v1AlphaHandler := grpcreflect.NewHandlerV1Alpha(reflector)
+		services = append(services, vanguard.NewService(v1AlphaPath, v1AlphaHandler))
+		slog.Info("registered reflection service", "version", "v1alpha", "path", v1AlphaPath)
 	}
 
 	return services, nil
