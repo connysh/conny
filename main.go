@@ -21,24 +21,38 @@ import (
 var Version = "dev"
 
 func main() {
+	const (
+		usageVersion    = "print version"
+		usagePort       = "listen port"
+		usageDescriptor = "path to proto descriptor file"
+		usageProtocol   = "upstream protocol (connect, grpc, grpcweb)"
+		usageReflection = "enable server reflection"
+	)
+
 	var version bool
-	flag.BoolVar(&version, "v", false, "print version")
-	flag.BoolVar(&version, "version", false, "print version")
+	flag.BoolVar(&version, "v", false, usageVersion)
+	flag.BoolVar(&version, "version", false, usageVersion)
 
 	var port string
-	flag.StringVar(&port, "p", envOrDefault("PORT", "8888"), "listen port")
-	flag.StringVar(&port, "port", envOrDefault("PORT", "8888"), "listen port")
+	defaultPort := envOrDefault("PORT", "8888")
+	flag.StringVar(&port, "p", defaultPort, usagePort)
+	flag.StringVar(&port, "port", defaultPort, usagePort)
 
 	var descriptor string
-	flag.StringVar(&descriptor, "d", os.Getenv("DESCRIPTOR"), "path to proto descriptor file")
-	flag.StringVar(&descriptor, "descriptor", os.Getenv("DESCRIPTOR"), "path to proto descriptor file")
+	defaultDescriptor := os.Getenv("DESCRIPTOR")
+	flag.StringVar(&descriptor, "d", defaultDescriptor, usageDescriptor)
+	flag.StringVar(&descriptor, "descriptor", defaultDescriptor, usageDescriptor)
 
 	var protocol string
-	flag.StringVar(&protocol, "protocol", envOrDefault("PROTOCOL", "connect"), "upstream protocol (connect, grpc, grpcweb)")
+	defaultProtocol := envOrDefault("PROTOCOL", "connect")
+	flag.StringVar(&protocol, "protocol", defaultProtocol, usageProtocol)
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
-		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "  -d, --descriptor string\n        %s\n", usageDescriptor)
+		fmt.Fprintf(os.Stderr, "  -p, --port string\n        %s (default %q)\n", usagePort, defaultPort)
+		fmt.Fprintf(os.Stderr, "      --protocol string\n        %s (default %q)\n", usageProtocol, defaultProtocol)
+		fmt.Fprintf(os.Stderr, "  -v, --version\n        %s\n", usageVersion)
 	}
 	flag.Parse()
 
