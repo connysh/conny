@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 
+	_ "buf.build/gen/go/grpc/grpc/protocolbuffers/go/grpc/reflection/v1"
 	"connectrpc.com/grpcreflect"
 	"connectrpc.com/vanguard"
 	"google.golang.org/protobuf/proto"
@@ -199,15 +200,16 @@ func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, prot
 	}
 
 	if enableReflection {
-		reflector := grpcreflect.NewStaticReflector(serviceNames...)
-		
+		reflector := grpcreflect.NewReflector(
+			&namer{services: serviceNames},
+			grpcreflect.WithDescriptorResolver(files),
+			grpcreflect.WithExtensionResolver(&extensionResolver{types}),
+		)
+
 		v1Path, v1Handler := grpcreflect.NewHandlerV1(reflector)
 		services = append(services, vanguard.NewService(v1Path, v1Handler))
 		slog.Info("registered reflection service", "version", "v1", "path", v1Path)
 
-		v1AlphaPath, v1AlphaHandler := grpcreflect.NewHandlerV1Alpha(reflector)
-		services = append(services, vanguard.NewService(v1AlphaPath, v1AlphaHandler))
-		slog.Info("registered reflection service", "version", "v1alpha", "path", v1AlphaPath)
 	}
 
 	return services, nil
@@ -220,5 +222,25 @@ func newReverseProxy(target *url.URL) *httputil.ReverseProxy {
 		originalDirector(req)
 		req.Host = target.Host
 	}
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		resp.Header.Del("Content-Length")
+		resp.ContentLength = -1
+		return nil
+	}
 	return proxy
+}
+
+type extensionResolver struct {
+	*dynamicpb.Types
+}
+
+func (e *extensionResolver) RangeExtensionsByMessage(message protoreflect.FullName, f func(protoreflect.ExtensionType) bool) {
+}
+
+type namer struct {
+	services []string
+}
+
+func (n *namer) Names() []string {
+	return n.services
 }
