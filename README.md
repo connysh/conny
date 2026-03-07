@@ -4,6 +4,12 @@ A tiny [ConnectRPC](https://connectrpc.com) gateway. Translates REST, gRPC, and 
 
 ## Install
 
+**Homebrew:**
+
+```sh
+brew install connysh/tap/conny
+```
+
 **Binary** (from [GitHub Releases](https://github.com/connysh/conny/releases)):
 
 ```sh

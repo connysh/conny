@@ -28,5 +28,13 @@ dockers_v2:
       "org.opencontainers.image.revision": "{{ .FullCommit }}"
       "org.opencontainers.image.version": "{{ .Version }}"
       "org.opencontainers.image.source": "{{ .GitURL }}"
+brews:
+  - repository:
+      owner: connysh
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    description: "A tiny ConnectRPC gateway"
+    homepage: "https://github.com/connysh/conny"
+    license: "Apache-2.0"
 changelog:
   disable: true
