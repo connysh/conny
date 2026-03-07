@@ -3,6 +3,7 @@ module github.com/connysh/conny
 go 1.25.0
 
 require (
+	buf.build/gen/go/grpc/grpc/protocolbuffers/go v1.36.11-20260203201457-e126be52bace.1
 	connectrpc.com/grpcreflect v1.3.0
 	connectrpc.com/vanguard v0.4.0
 	google.golang.org/protobuf v1.36.11
