@@ -1,17 +1,22 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	_ "buf.build/gen/go/grpc/grpc/protocolbuffers/go/grpc/reflection/v1"
+	"golang.org/x/net/http2"
 	"connectrpc.com/grpcreflect"
 	"connectrpc.com/vanguard"
 	"google.golang.org/protobuf/proto"
@@ -77,6 +82,11 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	var enableH2C bool
+	if strings.HasPrefix(rawURL, "h2c://") {
+		enableH2C = true
+		rawURL = "http://" + strings.TrimPrefix(rawURL, "h2c://")
+	}
 	targetURL, err := url.Parse(rawURL)
 	if err != nil {
 		log.Fatalf("invalid URL: %v", err)
@@ -100,7 +110,7 @@ func main() {
 	}
 	slog.Info("loaded descriptor set", "files", len(fds.GetFile()))
 
-	services, err := buildServices(fds, targetURL, vanguardProto, enableReflection)
+	services, err := buildServices(fds, targetURL, vanguardProto, enableReflection, enableH2C)
 	if err != nil {
 		log.Fatalf("failed to build services: %v", err)
 	}
@@ -164,14 +174,14 @@ func loadDescriptorSet(path string) (*descriptorpb.FileDescriptorSet, error) {
 	return fds, nil
 }
 
-func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol, enableReflection bool) ([]*vanguard.Service, error) {
+func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol, enableReflection, enableH2C bool) ([]*vanguard.Service, error) {
 	files, err := protodesc.NewFiles(fds)
 	if err != nil {
 		return nil, fmt.Errorf("creating file registry: %w", err)
 	}
 
 	types := dynamicpb.NewTypes(files)
-	proxy := newReverseProxy(targetURL)
+	proxy := newReverseProxy(targetURL, enableH2C)
 
 	var services []*vanguard.Service
 	var serviceNames []string
@@ -215,7 +225,7 @@ func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, prot
 	return services, nil
 }
 
-func newReverseProxy(target *url.URL) *httputil.ReverseProxy {
+func newReverseProxy(target *url.URL, enableH2C bool) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -226,6 +236,18 @@ func newReverseProxy(target *url.URL) *httputil.ReverseProxy {
 		resp.Header.Del("Content-Length")
 		resp.ContentLength = -1
 		return nil
+	}
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		slog.Error("upstream error", "method", r.Method, "path", r.URL.Path, "error", err)
+		w.WriteHeader(http.StatusBadGateway)
+	}
+	if enableH2C {
+		proxy.Transport = &http2.Transport{
+			AllowHTTP: true,
+			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+				return net.Dial(network, addr)
+			},
+		}
 	}
 	return proxy
 }

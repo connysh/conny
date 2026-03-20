@@ -35,6 +35,12 @@ go install github.com/connysh/conny@latest
 conny -d descriptor.pb http://localhost:8080
 ```
 
+Use `h2c://` for upstream servers that require HTTP/2 over plaintext (e.g. gRPC with streaming):
+
+```sh
+conny -d descriptor.pb h2c://localhost:8080
+```
+
 ### Flags
 
 | Flag | Env | Default | Description |
