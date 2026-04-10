@@ -47,6 +47,10 @@ conny -d descriptor.pb http://localhost:8080
 
 The backend URL can also be set via the `URL` environment variable.
 
+### Health check
+
+`GET /health` returns `200 OK` with body `ok`.
+
 ### Generate a descriptor
 
 ```sh
