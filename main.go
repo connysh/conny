@@ -131,13 +131,26 @@ func main() {
 	addr := fmt.Sprintf(":%s", port)
 	slog.Info("starting gateway", "addr", addr, "target", rawURL, "protocol", protocol)
 
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		if r.Method != http.MethodHead {
+			_, _ = w.Write([]byte("ok\n"))
+		}
+	})
+	mux.Handle("/", transcoder)
+
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 
 	server := &http.Server{
 		Addr:      addr,
-		Handler:   transcoder,
+		Handler:   mux,
 		Protocols: protocols,
 	}
 	if err := server.ListenAndServe(); err != nil {
