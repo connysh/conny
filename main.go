@@ -28,6 +28,26 @@ import (
 
 var Version = "dev"
 
+type stringSliceFlag []string
+
+func (f *stringSliceFlag) String() string { return strings.Join(*f, ", ") }
+func (f *stringSliceFlag) Set(s string) error {
+	*f = append(*f, s)
+	return nil
+}
+
+func parseHeaders(raw []string) (http.Header, error) {
+	h := make(http.Header)
+	for _, s := range raw {
+		k, v, ok := strings.Cut(s, ":")
+		if !ok {
+			return nil, fmt.Errorf("invalid header %q: expected \"Name: Value\"", s)
+		}
+		h.Set(strings.TrimSpace(k), strings.TrimSpace(v))
+	}
+	return h, nil
+}
+
 func main() {
 	const (
 		usageVersion    = "print version"
@@ -35,6 +55,7 @@ func main() {
 		usageDescriptor = "path to proto descriptor file"
 		usageProtocol   = "upstream protocol (connect, grpc, grpcweb)"
 		usageReflection = "enable server reflection"
+		usageHeader     = "add upstream header (\"Name: Value\"), repeatable; also via HEADER_<NAME>=<value> env vars"
 	)
 
 	var version bool
@@ -59,15 +80,30 @@ func main() {
 	defaultReflection := envOrDefaultBool("REFLECTION", false)
 	flag.BoolVar(&enableReflection, "reflection", defaultReflection, usageReflection)
 
+	var headerFlags stringSliceFlag
+	flag.Var(&headerFlags, "H", usageHeader)
+	flag.Var(&headerFlags, "header", usageHeader)
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
 		fmt.Fprintf(os.Stderr, "  -d, --descriptor string\n        %s\n", usageDescriptor)
+		fmt.Fprintf(os.Stderr, "  -H, --header string\n        %s\n", usageHeader)
 		fmt.Fprintf(os.Stderr, "  -p, --port string\n        %s (default %q)\n", usagePort, defaultPort)
 		fmt.Fprintf(os.Stderr, "      --protocol string\n        %s (default %q)\n", usageProtocol, defaultProtocol)
 		fmt.Fprintf(os.Stderr, "      --reflection\n        %s (default %t)\n", usageReflection, defaultReflection)
 		fmt.Fprintf(os.Stderr, "  -v, --version\n        %s\n", usageVersion)
 	}
 	flag.Parse()
+
+	var envHeaders stringSliceFlag
+	for _, env := range os.Environ() {
+		k, v, ok := strings.Cut(env, "=")
+		if ok && strings.HasPrefix(k, "HEADER_") {
+			name := strings.ReplaceAll(strings.TrimPrefix(k, "HEADER_"), "_", "-")
+			envHeaders = append(envHeaders, name+": "+v)
+		}
+	}
+	headerFlags = append(envHeaders, headerFlags...)
 
 	if version {
 		fmt.Println(Version)
@@ -104,13 +140,18 @@ func main() {
 		log.Fatalf("invalid protocol: %s (must be connect, grpc, or grpcweb)", protocol)
 	}
 
+	upstreamHeaders, err := parseHeaders(headerFlags)
+	if err != nil {
+		log.Fatalf("invalid header: %v", err)
+	}
+
 	fds, err := loadDescriptorSet(descriptor)
 	if err != nil {
 		log.Fatalf("failed to load descriptor set: %v", err)
 	}
 	slog.Info("loaded descriptor set", "files", len(fds.GetFile()))
 
-	services, err := buildServices(fds, targetURL, vanguardProto, enableReflection, enableH2C)
+	services, err := buildServices(fds, targetURL, vanguardProto, enableReflection, enableH2C, upstreamHeaders)
 	if err != nil {
 		log.Fatalf("failed to build services: %v", err)
 	}
@@ -187,14 +228,14 @@ func loadDescriptorSet(path string) (*descriptorpb.FileDescriptorSet, error) {
 	return fds, nil
 }
 
-func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol, enableReflection, enableH2C bool) ([]*vanguard.Service, error) {
+func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol, enableReflection, enableH2C bool, extraHeaders http.Header) ([]*vanguard.Service, error) {
 	files, err := protodesc.NewFiles(fds)
 	if err != nil {
 		return nil, fmt.Errorf("creating file registry: %w", err)
 	}
 
 	types := dynamicpb.NewTypes(files)
-	proxy := newReverseProxy(targetURL, enableH2C)
+	proxy := newReverseProxy(targetURL, enableH2C, extraHeaders)
 
 	var services []*vanguard.Service
 	var serviceNames []string
@@ -238,12 +279,15 @@ func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, prot
 	return services, nil
 }
 
-func newReverseProxy(target *url.URL, enableH2C bool) *httputil.ReverseProxy {
+func newReverseProxy(target *url.URL, enableH2C bool, extraHeaders http.Header) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Host = target.Host
+		for k, vs := range extraHeaders {
+			req.Header[k] = vs
+		}
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		resp.Header.Del("Content-Length")
