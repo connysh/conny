@@ -120,6 +120,7 @@ func main() {
 		vanguard.WithCodec(func(res vanguard.TypeResolver) vanguard.Codec {
 			codec := vanguard.NewJSONCodec(res)
 			codec.MarshalOptions.UseProtoNames = true
+			codec.MarshalOptions.EmitUnpopulated = true
 			codec.UnmarshalOptions.DiscardUnknown = true
 			return codec
 		}),
