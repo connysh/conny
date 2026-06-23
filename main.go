@@ -16,9 +16,9 @@ import (
 	"strings"
 
 	_ "buf.build/gen/go/grpc/grpc/protocolbuffers/go/grpc/reflection/v1"
-	"golang.org/x/net/http2"
 	"connectrpc.com/grpcreflect"
 	"connectrpc.com/vanguard"
+	"golang.org/x/net/http2"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -35,6 +35,7 @@ func main() {
 		usageDescriptor = "path to proto descriptor file"
 		usageProtocol   = "upstream protocol (connect, grpc, grpcweb)"
 		usageReflection = "enable server reflection"
+		usagePayment    = "upgrade upstream auth errors carrying a payment challenge to HTTP 402 (REST clients)"
 	)
 
 	var version bool
@@ -59,12 +60,17 @@ func main() {
 	defaultReflection := envOrDefaultBool("REFLECTION", false)
 	flag.BoolVar(&enableReflection, "reflection", defaultReflection, usageReflection)
 
+	var enablePayment bool
+	defaultPayment := envOrDefaultBool("PAYMENT", false)
+	flag.BoolVar(&enablePayment, "payment", defaultPayment, usagePayment)
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
 		fmt.Fprintf(os.Stderr, "  -d, --descriptor string\n        %s\n", usageDescriptor)
 		fmt.Fprintf(os.Stderr, "  -p, --port string\n        %s (default %q)\n", usagePort, defaultPort)
 		fmt.Fprintf(os.Stderr, "      --protocol string\n        %s (default %q)\n", usageProtocol, defaultProtocol)
 		fmt.Fprintf(os.Stderr, "      --reflection\n        %s (default %t)\n", usageReflection, defaultReflection)
+		fmt.Fprintf(os.Stderr, "      --payment\n        %s (default %t)\n", usagePayment, defaultPayment)
 		fmt.Fprintf(os.Stderr, "  -v, --version\n        %s\n", usageVersion)
 	}
 	flag.Parse()
@@ -143,7 +149,11 @@ func main() {
 			_, _ = w.Write([]byte("ok\n"))
 		}
 	})
-	mux.Handle("/", transcoder)
+	var rootHandler http.Handler = transcoder
+	if enablePayment {
+		rootHandler = withPaymentRequired(transcoder)
+	}
+	mux.Handle("/", rootHandler)
 
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
@@ -264,6 +274,93 @@ func newReverseProxy(target *url.URL, enableH2C bool) *httputil.ReverseProxy {
 		}
 	}
 	return proxy
+}
+
+// paymentAuthSchemes are the WWW-Authenticate challenge schemes that signal a
+// payment is required. gRPC/Connect have no status code for HTTP 402, so an
+// upstream signals "payment required" with a normal auth error (Unauthenticated
+// or PermissionDenied) plus a WWW-Authenticate challenge; conny upgrades the
+// REST status to 402.
+var paymentAuthSchemes = []string{"Payment", "X402", "L402"}
+
+func isPaymentChallenge(wwwAuthenticate string) bool {
+	scheme := wwwAuthenticate
+	if i := strings.IndexByte(scheme, ' '); i >= 0 {
+		scheme = scheme[:i]
+	}
+	for _, s := range paymentAuthSchemes {
+		if strings.EqualFold(scheme, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// withPaymentRequired upgrades a REST response to 402 Payment Required when the
+// upstream returned an auth error (401/403) carrying a payment WWW-Authenticate
+// challenge. The challenge header is already forwarded by the transcoder and is
+// left intact so REST clients can complete the payment flow.
+//
+// The upgrade applies only to REST requests. RPC clients (gRPC, gRPC-Web,
+// Connect) carry the real auth code natively in the response body/trailer and
+// receive the WWW-Authenticate metadata directly, so they need nothing rewritten
+// — and 402 has no Connect/gRPC code equivalent, so forcing it would only make
+// their HTTP status inconsistent with the code in their body. They pass through
+// untouched.
+func withPaymentRequired(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isRPCRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(&paymentRequiredWriter{ResponseWriter: w}, r)
+	})
+}
+
+// isRPCRequest reports whether the request arrived over gRPC, gRPC-Web, or
+// Connect rather than as a plain REST/HTTP call.
+func isRPCRequest(r *http.Request) bool {
+	if r.Header.Get("Connect-Protocol-Version") != "" || r.URL.Query().Has("connect") {
+		return true
+	}
+	contentType := r.Header.Get("Content-Type")
+	return strings.HasPrefix(contentType, "application/grpc") ||
+		strings.HasPrefix(contentType, "application/connect")
+}
+
+type paymentRequiredWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (w *paymentRequiredWriter) WriteHeader(code int) {
+	if !w.wroteHeader {
+		w.wroteHeader = true
+		if (code == http.StatusUnauthorized || code == http.StatusForbidden) &&
+			isPaymentChallenge(w.Header().Get("Www-Authenticate")) {
+			code = http.StatusPaymentRequired
+		}
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *paymentRequiredWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush and Unwrap expose the underlying writer's capabilities; the transcoder
+// requires the response writer to implement http.Flusher.
+func (w *paymentRequiredWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (w *paymentRequiredWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 type extensionResolver struct {
