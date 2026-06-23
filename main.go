@@ -320,7 +320,12 @@ func withPaymentRequired(next http.Handler) http.Handler {
 // isRPCRequest reports whether the request arrived over gRPC, gRPC-Web, or
 // Connect rather than as a plain REST/HTTP call.
 func isRPCRequest(r *http.Request) bool {
-	if r.Header.Get("Connect-Protocol-Version") != "" || r.URL.Query().Has("connect") {
+	// Connect (the only RPC protocol that surfaces auth errors as a real HTTP
+	// status, like REST) is signaled by the version header or the connect=v1
+	// query param — both with exact values, matching vanguard's classifyRequest.
+	// REST and Connect-unary share the application/json content type, so the
+	// header/query markers are the only thing that distinguishes them.
+	if r.Header.Get("Connect-Protocol-Version") == "1" || r.URL.Query().Get("connect") == "v1" {
 		return true
 	}
 	contentType := r.Header.Get("Content-Type")

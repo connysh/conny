@@ -49,6 +49,7 @@ conny -d descriptor.pb h2c://localhost:8080
 | `-p, --port`       | `PORT`       | `8888` | Listen port |
 | `--protocol`       | `PROTOCOL`   | `connect` | Upstream protocol (`connect`, `grpc`, `grpcweb`) |
 | `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
+| `--payment`        | `PAYMENT`    | `false` | Map upstream payment challenges (`WWW-Authenticate`) to HTTP 402 for REST clients |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
