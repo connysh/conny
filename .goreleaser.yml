@@ -1,6 +1,6 @@
 version: 2
 builds:
-  - main: .
+  - main: ./cmd/conny
     binary: conny
     env:
       - CGO_ENABLED=0

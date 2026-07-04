@@ -26,7 +26,7 @@ docker pull ghcr.io/connysh/conny:latest
 **Go:**
 
 ```sh
-go install github.com/connysh/conny@latest
+go install github.com/connysh/conny/cmd/conny@latest
 ```
 
 ## Usage
@@ -49,7 +49,7 @@ conny -d descriptor.pb h2c://localhost:8080
 | `-p, --port`       | `PORT`       | `8888` | Listen port |
 | `--protocol`       | `PROTOCOL`   | `connect` | Upstream protocol (`connect`, `grpc`, `grpcweb`) |
 | `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
-| `--payment`        | `PAYMENT`    | `false` | Map upstream payment challenges (`WWW-Authenticate`) to HTTP 402 for REST clients |
+| `--payment`        | `PAYMENT`    | `false` | Upgrade 401 responses with a `Payment` `WWW-Authenticate` challenge to HTTP 402 (REST clients only) |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
@@ -86,6 +86,47 @@ volumes:
     configMap:
       name: conny-descriptor
 ```
+
+## Use as a library
+
+conny can also be embedded in a Go program. Build a `conny.Config` and either
+serve it directly or mount its `http.Handler` in your own server:
+
+```go
+package main
+
+import (
+	"log"
+	"net/http"
+
+	"github.com/connysh/conny"
+)
+
+func main() {
+	cfg := conny.Config{
+		DescriptorPath: "descriptor.pb",     // or Descriptor: fds
+		Target:         "h2c://localhost:8080",
+		Protocol:       "connect",           // connect | grpc | grpcweb
+		Reflection:     true,
+		Payment:        true,
+	}
+
+	// Serve directly (HTTP/1 + h2c, blocks):
+	log.Fatal(conny.ListenAndServe(":8888", cfg))
+
+	// ...or mount the handler in your own mux / middleware stack:
+	h, err := conny.NewHandler(cfg)
+	if err != nil {
+		log.Fatal(err)
+	}
+	http.Handle("/api/", http.StripPrefix("/api", h))
+}
+```
+
+Every CLI flag has a `Config` field. Provide the descriptor either as a path
+(`DescriptorPath`) or an in-memory `*descriptorpb.FileDescriptorSet`
+(`Descriptor`). Set `Logger` to route structured logs; it defaults to
+`slog.Default()`.
 
 ## License
 
