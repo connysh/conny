@@ -21,6 +21,7 @@ func main() {
 		usageProtocol   = "upstream protocol (connect, grpc, grpcweb)"
 		usageReflection = "enable server reflection"
 		usagePayment    = `upgrade 401 responses with a "Payment" WWW-Authenticate challenge to HTTP 402 (REST clients only)`
+		usageStatic     = "directory of static files to serve alongside the RPC routes (e.g. a pre-generated openapi.json)"
 	)
 
 	var version bool
@@ -49,6 +50,10 @@ func main() {
 	defaultPayment := envOrDefaultBool("PAYMENT", false)
 	flag.BoolVar(&enablePayment, "payment", defaultPayment, usagePayment)
 
+	var staticDir string
+	defaultStatic := os.Getenv("STATIC")
+	flag.StringVar(&staticDir, "static", defaultStatic, usageStatic)
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
 		fmt.Fprintf(os.Stderr, "  -d, --descriptor string\n        %s\n", usageDescriptor)
@@ -56,6 +61,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "      --protocol string\n        %s (default %q)\n", usageProtocol, defaultProtocol)
 		fmt.Fprintf(os.Stderr, "      --reflection\n        %s (default %t)\n", usageReflection, defaultReflection)
 		fmt.Fprintf(os.Stderr, "      --payment\n        %s (default %t)\n", usagePayment, defaultPayment)
+		fmt.Fprintf(os.Stderr, "      --static string\n        %s\n", usageStatic)
 		fmt.Fprintf(os.Stderr, "  -v, --version\n        %s\n", usageVersion)
 	}
 	flag.Parse()
@@ -80,6 +86,7 @@ func main() {
 		Protocol:       protocol,
 		Reflection:     enableReflection,
 		Payment:        enablePayment,
+		StaticDir:      staticDir,
 	}
 
 	addr := fmt.Sprintf(":%s", port)

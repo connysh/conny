@@ -50,6 +50,7 @@ conny -d descriptor.pb h2c://localhost:8080
 | `--protocol`       | `PROTOCOL`   | `connect` | Upstream protocol (`connect`, `grpc`, `grpcweb`) |
 | `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
 | `--payment`        | `PAYMENT`    | `false` | Upgrade 401 responses with a `Payment` `WWW-Authenticate` challenge to HTTP 402 (REST clients only) |
+| `--static`         | `STATIC`     | | Directory of static files to serve alongside the RPC routes |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
@@ -57,6 +58,18 @@ The backend URL can also be set via the `URL` environment variable.
 ### Health check
 
 `GET /health` returns `200 OK` with body `ok`.
+
+### Static files
+
+`--static <dir>` serves files alongside the RPC routes — a pre-generated
+`openapi.json`, a docs page, a favicon. Requests that don't name a file fall
+through to the transcoder, so RPCs are unaffected. Dot-prefixed names and
+directories without an `index.html` are never served.
+
+```sh
+conny -d descriptor.pb --static ./public http://localhost:8080
+curl localhost:8888/openapi.json
+```
 
 ### Generate a descriptor
 
@@ -109,6 +122,7 @@ func main() {
 		Protocol:       "connect",           // connect | grpc | grpcweb
 		Reflection:     true,
 		Payment:        true,
+		StaticDir:      "./public",          // optional
 	}
 
 	// Serve directly (HTTP/1 + h2c, blocks):

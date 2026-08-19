@@ -46,6 +46,11 @@ type Config struct {
 	// returns a 401 carrying a "Payment" WWW-Authenticate challenge.
 	Payment bool
 
+	// StaticDir is a directory served alongside the RPC routes — for a
+	// pre-generated openapi.json, a docs UI, and the like. Requests that do not
+	// name a file in it fall through to the transcoder. Disabled when empty.
+	StaticDir string
+
 	// Logger receives structured logs. Defaults to slog.Default() when nil.
 	Logger *slog.Logger
 }
@@ -57,7 +62,8 @@ func (c Config) logger() *slog.Logger {
 	return slog.Default()
 }
 
-// NewHandler builds the gateway's http.Handler — /health plus the transcoder —
+// NewHandler builds the gateway's http.Handler — /health, any static files,
+// plus the transcoder —
 // for mounting in your own server or middleware stack. To accept gRPC or h2c
 // clients, enable unencrypted HTTP/2 on your server (see [ListenAndServe]).
 func NewHandler(c Config) (http.Handler, error) {
@@ -113,6 +119,13 @@ func NewHandler(c Config) (http.Handler, error) {
 	var rootHandler http.Handler = transcoder
 	if c.Payment {
 		rootHandler = withPaymentRequired(transcoder)
+	}
+	if c.StaticDir != "" {
+		rootHandler, err = withStatic(c.StaticDir, rootHandler)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("serving static files", "dir", c.StaticDir)
 	}
 	mux.Handle("/", rootHandler)
 
