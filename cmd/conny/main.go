@@ -22,6 +22,7 @@ func main() {
 		usageReflection = "enable server reflection"
 		usagePayment    = `upgrade 401 responses with a "Payment" WWW-Authenticate challenge to HTTP 402 (REST clients only)`
 		usageStatic     = "directory of static files to serve alongside the RPC routes (e.g. a pre-generated openapi.json)"
+		usageMCP        = "serve an MCP endpoint at /mcp exposing unary RPCs as tools"
 	)
 
 	var version bool
@@ -54,6 +55,10 @@ func main() {
 	defaultStatic := os.Getenv("STATIC")
 	flag.StringVar(&staticDir, "static", defaultStatic, usageStatic)
 
+	var enableMCP bool
+	defaultMCP := envOrDefaultBool("MCP", false)
+	flag.BoolVar(&enableMCP, "mcp", defaultMCP, usageMCP)
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
 		fmt.Fprintf(os.Stderr, "  -d, --descriptor string\n        %s\n", usageDescriptor)
@@ -62,6 +67,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "      --reflection\n        %s (default %t)\n", usageReflection, defaultReflection)
 		fmt.Fprintf(os.Stderr, "      --payment\n        %s (default %t)\n", usagePayment, defaultPayment)
 		fmt.Fprintf(os.Stderr, "      --static string\n        %s\n", usageStatic)
+		fmt.Fprintf(os.Stderr, "      --mcp\n        %s (default %t)\n", usageMCP, defaultMCP)
 		fmt.Fprintf(os.Stderr, "  -v, --version\n        %s\n", usageVersion)
 	}
 	flag.Parse()
@@ -87,6 +93,8 @@ func main() {
 		Reflection:     enableReflection,
 		Payment:        enablePayment,
 		StaticDir:      staticDir,
+		MCP:            enableMCP,
+		Version:        Version,
 	}
 
 	addr := fmt.Sprintf(":%s", port)

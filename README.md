@@ -51,6 +51,7 @@ conny -d descriptor.pb h2c://localhost:8080
 | `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
 | `--payment`        | `PAYMENT`    | `false` | Upgrade 401 responses with a `Payment` `WWW-Authenticate` challenge to HTTP 402 (REST clients only) |
 | `--static`         | `STATIC`     | | Directory of static files to serve alongside the RPC routes |
+| `--mcp`            | `MCP`        | `false` | Serve an MCP endpoint at `/mcp` exposing unary RPCs as tools |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
@@ -69,6 +70,21 @@ directories without an `index.html` are never served.
 ```sh
 conny -d descriptor.pb --static ./public http://localhost:8080
 curl localhost:8888/openapi.json
+```
+
+### MCP
+
+`--mcp` serves a [Model Context Protocol](https://modelcontextprotocol.io)
+endpoint at `/mcp`, exposing every unary method as a tool an agent can call.
+Tools are named for the method's full proto name with dots replaced by
+underscores, take the request message as JSON, and are documented from its
+`.proto` comments. Methods bound to HTTP `GET` are marked read-only, streaming
+methods are skipped, and a caller's `Authorization` header is passed upstream.
+Calls take the same path as any other client's, so `--protocol` applies.
+
+```sh
+conny -d descriptor.pb --mcp http://localhost:8080
+npx @modelcontextprotocol/inspector http://localhost:8888/mcp
 ```
 
 ### Generate a descriptor
@@ -123,6 +139,7 @@ func main() {
 		Reflection:     true,
 		Payment:        true,
 		StaticDir:      "./public",          // optional
+		MCP:            true,
 	}
 
 	// Serve directly (HTTP/1 + h2c, blocks):
