@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +24,9 @@ func staticTestHandler(t *testing.T) (http.Handler, string) {
 		}
 	}
 	write("openapi.json", `{"openapi":"3.1.0"}`)
+	write("openapi.yaml", "openapi: 3.1.0\n")
+	write("README.md", "# docs\n")
+	write("schema.xml", "<schema/>\n")
 	write("index.html", "<h1>docs</h1>")
 	write("docs/index.html", "<h1>nested</h1>")
 	write(".env", "SECRET_KEY=hunter2")
@@ -71,8 +75,38 @@ func TestStaticServesFiles(t *testing.T) {
 	}
 }
 
-// Anything the static tree does not hold must reach the transcoder, or the
-// gateway would stop serving RPCs the moment --static was set.
+func TestStaticContentTypes(t *testing.T) {
+	h, _ := staticTestHandler(t)
+
+	tests := []struct {
+		path  string
+		want  string
+		exact bool
+	}{
+		{path: "/openapi.yaml", want: "application/yaml", exact: true},
+		{path: "/README.md", want: "text/markdown; charset=utf-8", exact: true},
+		{path: "/schema.xml", want: "application/xml", exact: true},
+		{path: "/openapi.json", want: "application/json"},
+		{path: "/", want: "text/html"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			got := rec.Header().Get("Content-Type")
+			if tt.exact && got != tt.want {
+				t.Errorf("content type = %q, want %q", got, tt.want)
+			}
+			if !tt.exact && !strings.HasPrefix(got, tt.want) {
+				t.Errorf("content type = %q, want it to start with %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStaticFallsThrough(t *testing.T) {
 	h, _ := staticTestHandler(t)
 
@@ -98,9 +132,6 @@ func TestStaticFallsThrough(t *testing.T) {
 	}
 }
 
-// http.FileServer serves dotfiles by default. A static dir will sometimes sit
-// next to an .env or a .git, and Kubernetes volume internals live under
-// ..data, so none of them may be reachable.
 func TestStaticHidesDotfiles(t *testing.T) {
 	h, _ := staticTestHandler(t)
 
