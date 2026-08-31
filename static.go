@@ -34,8 +34,18 @@ func withStatic(dir string, next http.Handler) (http.Handler, error) {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if ctype, ok := staticContentTypes[strings.ToLower(path.Ext(r.URL.Path))]; ok {
+			w.Header().Set("Content-Type", ctype)
+		}
 		files.ServeHTTP(w, r)
 	}), nil
+}
+
+var staticContentTypes = map[string]string{
+	".yaml": "application/yaml", // RFC 9512
+	".yml":  "application/yaml",
+	".md":   "text/markdown; charset=utf-8", // RFC 7763
+	".xml":  "application/xml",              // RFC 7303
 }
 
 // staticFileExists reports whether urlPath resolves to a regular file in fsys.
