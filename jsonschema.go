@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 // maxSchemaDepth caps how far nested messages are expanded. Messages may
@@ -41,6 +44,7 @@ func messageSchema(md protoreflect.MessageDescriptor, expanding map[protoreflect
 	defer delete(expanding, md.FullName())
 
 	properties := map[string]any{}
+	var required []string
 	fields := md.Fields()
 	for i := range fields.Len() {
 		fd := fields.Get(i)
@@ -48,6 +52,9 @@ func messageSchema(md protoreflect.MessageDescriptor, expanding map[protoreflect
 			continue
 		}
 		properties[fd.TextName()] = fieldSchema(fd, expanding, depth)
+		if fieldRules(fd).GetRequired() {
+			required = append(required, fd.TextName())
+		}
 	}
 
 	schema := map[string]any{
@@ -56,6 +63,9 @@ func messageSchema(md protoreflect.MessageDescriptor, expanding map[protoreflect
 		// The transcoder discards unknown fields, so an invented one would fail
 		// silently. Closing the object turns that into a visible error.
 		"additionalProperties": false,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
 	}
 	if doc := comment(md); doc != "" {
 		schema["description"] = doc
@@ -99,7 +109,11 @@ func valueSchema(fd protoreflect.FieldDescriptor, expanding map[protoreflect.Ful
 	case protoreflect.BoolKind:
 		return map[string]any{"type": "boolean"}
 	case protoreflect.StringKind:
-		return map[string]any{"type": "string"}
+		schema := map[string]any{"type": "string"}
+		if in := stringInValues(fd); len(in) > 0 {
+			schema["enum"] = in
+		}
+		return schema
 	case protoreflect.BytesKind:
 		return map[string]any{"type": "string", "contentEncoding": "base64"}
 	case protoreflect.FloatKind, protoreflect.DoubleKind:
@@ -217,6 +231,30 @@ func oneofNote(od protoreflect.OneofDescriptor) string {
 		names = append(names, fields.Get(i).TextName())
 	}
 	return fmt.Sprintf("part of oneof %q: set at most one of %s", od.Name(), strings.Join(names, ", "))
+}
+
+// fieldRules returns fd's buf.validate constraints, or nil if it has none —
+// either because the descriptor set never imported buf/validate/validate.proto,
+// or because this particular field carries no (buf.validate.field) option. Its
+// getters are nil-receiver-safe, so callers use it directly (fieldRules(fd).GetRequired()).
+func fieldRules(fd protoreflect.FieldDescriptor) *validate.FieldRules {
+	options, ok := fd.Options().(*descriptorpb.FieldOptions)
+	if !ok || options == nil {
+		return nil
+	}
+	rules, _ := proto.GetExtension(options, validate.E_Field).(*validate.FieldRules)
+	return rules
+}
+
+// stringInValues returns the closed set of strings fd is constrained to by a
+// buf.validate `string.in` rule — on the field itself for a scalar, or on its
+// items for a repeated field — or nil if there is no such constraint.
+func stringInValues(fd protoreflect.FieldDescriptor) []string {
+	rules := fieldRules(fd)
+	if fd.IsList() {
+		return rules.GetRepeated().GetItems().GetString_().GetIn()
+	}
+	return rules.GetString_().GetIn()
 }
 
 // comment returns the leading .proto comment for d, empty when the descriptor set
