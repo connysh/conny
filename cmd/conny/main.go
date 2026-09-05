@@ -22,8 +22,7 @@ func main() {
 		usageReflection = "enable server reflection"
 		usageStatic     = "directory of static files to serve alongside the RPC routes (e.g. a pre-generated openapi.json)"
 		usageMCP        = "serve an MCP endpoint at /mcp exposing unary RPCs as tools"
-		usageMPP        = "translate the upstream's Machine Payments Protocol flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients (not to be confused with --mcp)"
-		usagePayment    = "deprecated alias of --mpp"
+		usagePayment    = "translate the upstream's Machine Payments Protocol flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients"
 	)
 
 	var version bool
@@ -56,12 +55,9 @@ func main() {
 	defaultMCP := envOrDefaultBool("MCP", false)
 	flag.BoolVar(&enableMCP, "mcp", defaultMCP, usageMCP)
 
-	var enableMPP bool
-	defaultMPP := envOrDefaultBool("MPP", false)
-	flag.BoolVar(&enableMPP, "mpp", defaultMPP, usageMPP)
-
 	var enablePayment bool
-	flag.BoolVar(&enablePayment, "payment", envOrDefaultBool("PAYMENT", false), usagePayment)
+	defaultPayment := envOrDefaultBool("PAYMENT", false)
+	flag.BoolVar(&enablePayment, "payment", defaultPayment, usagePayment)
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
@@ -71,7 +67,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "      --reflection\n        %s (default %t)\n", usageReflection, defaultReflection)
 		fmt.Fprintf(os.Stderr, "      --static string\n        %s\n", usageStatic)
 		fmt.Fprintf(os.Stderr, "      --mcp\n        %s (default %t)\n", usageMCP, defaultMCP)
-		fmt.Fprintf(os.Stderr, "      --mpp\n        %s (default %t)\n", usageMPP, defaultMPP)
+		fmt.Fprintf(os.Stderr, "      --payment\n        %s (default %t)\n", usagePayment, defaultPayment)
 		fmt.Fprintf(os.Stderr, "  -v, --version\n        %s\n", usageVersion)
 	}
 	flag.Parse()
@@ -79,11 +75,6 @@ func main() {
 	if version {
 		fmt.Println(Version)
 		os.Exit(0)
-	}
-
-	if enablePayment {
-		slog.Warn("--payment and PAYMENT are deprecated; use --mpp and MPP")
-		enableMPP = true
 	}
 
 	rawURL := flag.Arg(0)
@@ -102,7 +93,7 @@ func main() {
 		Reflection:     enableReflection,
 		StaticDir:      staticDir,
 		MCP:            enableMCP,
-		MPP:            enableMPP,
+		Payment:        enablePayment,
 		Version:        Version,
 	}
 

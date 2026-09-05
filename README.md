@@ -51,11 +51,10 @@ conny -d descriptor.pb h2c://localhost:8080
 | `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
 | `--static`         | `STATIC`     | | Directory of static files to serve alongside the RPC routes |
 | `--mcp`            | `MCP`        | `false` | Serve an MCP endpoint at `/mcp` exposing unary RPCs as tools |
-| `--mpp`            | `MPP`        | `false` | Translate the upstream's [Machine Payments Protocol](https://mpp.dev) flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients |
+| `--payment`        | `PAYMENT`    | `false` | Translate the upstream's [Machine Payments Protocol](https://mpp.dev) flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
-`--payment` and `PAYMENT` still work as deprecated aliases of `--mpp` and `MPP`.
 
 ### Health check
 
@@ -83,7 +82,7 @@ underscores, take the request message as JSON, and are documented from its
 methods are skipped, and a caller's `Authorization` header is passed upstream.
 Calls take the same path as any other client's, so `--protocol` applies.
 
-With `--mpp`, tool calls follow the
+With `--payment`, tool calls follow the
 [MPP MCP binding](https://mpp.dev/protocol/transports/mcp), so an MPP-aware
 agent can pay an upstream that charges per call without leaving MCP. An upstream
 `Payment` challenge comes back as JSON-RPC error `-32042` carrying the
@@ -151,7 +150,7 @@ func main() {
 		Reflection:     true,
 		StaticDir:      "./public",          // optional
 		MCP:            true,
-		MPP:            true,
+		Payment:        true,
 	}
 
 	// Serve directly (HTTP/1 + h2c, blocks):

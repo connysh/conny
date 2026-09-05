@@ -18,7 +18,7 @@ import (
 // 401 Unauthenticated plus the header, and conny translates for clients that
 // expect MPP's own shape: 402 for REST, and for MCP the binding in
 // draft-payment-transport-mcp-00, where the challenge is a JSON-RPC error and the
-// credential and receipt travel in _meta. Enabled by Config.MPP.
+// credential and receipt travel in _meta. Enabled by Config.Payment.
 
 // ---- REST clients ----
 
