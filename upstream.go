@@ -14,18 +14,12 @@ import (
 	"connectrpc.com/grpcreflect"
 	"connectrpc.com/vanguard"
 	"golang.org/x/net/http2"
-	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
-func buildServices(fds *descriptorpb.FileDescriptorSet, targetURL *url.URL, protocol vanguard.Protocol, enableReflection, enableH2C bool, logger *slog.Logger) ([]*vanguard.Service, error) {
-	files, err := protodesc.NewFiles(fds)
-	if err != nil {
-		return nil, fmt.Errorf("creating file registry: %w", err)
-	}
-
+func buildServices(files *protoregistry.Files, targetURL *url.URL, protocol vanguard.Protocol, enableReflection, enableH2C bool, logger *slog.Logger) ([]*vanguard.Service, error) {
 	types := dynamicpb.NewTypes(files)
 	proxy := newReverseProxy(targetURL, enableH2C, logger)
 

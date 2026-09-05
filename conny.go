@@ -18,6 +18,7 @@ import (
 
 	"connectrpc.com/vanguard"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
@@ -42,14 +43,23 @@ type Config struct {
 	// Reflection enables gRPC server reflection (v1).
 	Reflection bool
 
-	// Payment upgrades REST responses to 402 Payment Required when the upstream
-	// returns a 401 carrying a "Payment" WWW-Authenticate challenge.
-	Payment bool
-
 	// StaticDir is a directory served alongside the RPC routes — for a
 	// pre-generated openapi.json, a docs UI, and the like. Requests that do not
 	// name a file in it fall through to the transcoder. Disabled when empty.
 	StaticDir string
+
+	// MCP serves a Model Context Protocol endpoint at /mcp, exposing each unary
+	// method in the descriptor as a tool an agent can call. Disabled when false.
+	MCP bool
+
+	// Payment translates the upstream's Machine Payments Protocol (MPP) flow for
+	// clients that expect MPP's native shape: 402 Payment Required for REST, and
+	// the MPP MCP binding (JSON-RPC errors and _meta) for MCP tool calls.
+	Payment bool
+
+	// Version is reported to MCP clients as the server's version. Defaults to
+	// "dev" when empty.
+	Version string
 
 	// Logger receives structured logs. Defaults to slog.Default() when nil.
 	Logger *slog.Logger
@@ -62,8 +72,8 @@ func (c Config) logger() *slog.Logger {
 	return slog.Default()
 }
 
-// NewHandler builds the gateway's http.Handler — /health, any static files,
-// plus the transcoder —
+// NewHandler builds the gateway's http.Handler — /health, any static files, an
+// MCP endpoint at /mcp when enabled, plus the transcoder —
 // for mounting in your own server or middleware stack. To accept gRPC or h2c
 // clients, enable unencrypted HTTP/2 on your server (see [ListenAndServe]).
 func NewHandler(c Config) (http.Handler, error) {
@@ -75,6 +85,11 @@ func NewHandler(c Config) (http.Handler, error) {
 	}
 	logger.Info("loaded descriptor set", "files", len(fds.GetFile()))
 
+	files, err := protodesc.NewFiles(fds)
+	if err != nil {
+		return nil, fmt.Errorf("conny: creating file registry: %w", err)
+	}
+
 	target, enableH2C, err := c.resolveTarget()
 	if err != nil {
 		return nil, err
@@ -85,7 +100,7 @@ func NewHandler(c Config) (http.Handler, error) {
 		return nil, err
 	}
 
-	services, err := buildServices(fds, target, proto, c.Reflection, enableH2C, logger)
+	services, err := buildServices(files, target, proto, c.Reflection, enableH2C, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -115,6 +130,16 @@ func NewHandler(c Config) (http.Handler, error) {
 			_, _ = w.Write([]byte("ok\n"))
 		}
 	})
+
+	if c.Payment {
+		logger.Info("translating mpp payment flow for rest and mcp clients")
+	}
+
+	if c.MCP {
+		mcpHandler, tools := newMCPHandler(files, transcoder, c.Version, c.Payment, logger)
+		mux.Handle(mcpPath, mcpHandler)
+		logger.Info("serving mcp", "path", mcpPath, "tools", tools)
+	}
 
 	var rootHandler http.Handler = transcoder
 	if c.Payment {

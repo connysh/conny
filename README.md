@@ -49,8 +49,9 @@ conny -d descriptor.pb h2c://localhost:8080
 | `-p, --port`       | `PORT`       | `8888` | Listen port |
 | `--protocol`       | `PROTOCOL`   | `connect` | Upstream protocol (`connect`, `grpc`, `grpcweb`) |
 | `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
-| `--payment`        | `PAYMENT`    | `false` | Upgrade 401 responses with a `Payment` `WWW-Authenticate` challenge to HTTP 402 (REST clients only) |
 | `--static`         | `STATIC`     | | Directory of static files to serve alongside the RPC routes |
+| `--mcp`            | `MCP`        | `false` | Serve an MCP endpoint at `/mcp` exposing unary RPCs as tools |
+| `--payment`        | `PAYMENT`    | `false` | Translate the upstream's [Machine Payments Protocol](https://mpp.dev) flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
@@ -69,6 +70,32 @@ directories without an `index.html` are never served.
 ```sh
 conny -d descriptor.pb --static ./public http://localhost:8080
 curl localhost:8888/openapi.json
+```
+
+### MCP
+
+`--mcp` serves a [Model Context Protocol](https://modelcontextprotocol.io)
+endpoint at `/mcp`, exposing every unary method as a tool an agent can call.
+Tools are named for the method's full proto name with dots replaced by
+underscores, take the request message as JSON, and are documented from its
+`.proto` comments. Methods bound to HTTP `GET` are marked read-only, streaming
+methods are skipped, and a caller's `Authorization` header is passed upstream.
+Calls take the same path as any other client's, so `--protocol` applies.
+
+With `--payment`, tool calls follow the
+[MPP MCP binding](https://mpp.dev/protocol/transports/mcp), so an MPP-aware
+agent can pay an upstream that charges per call without leaving MCP. An upstream
+`Payment` challenge comes back as JSON-RPC error `-32042` carrying the
+challenge; the agent retries with its credential in
+`_meta["org.paymentauth/credential"]`, which conny sends upstream as the
+`Authorization: Payment` header; a rejected credential is error `-32043` with a
+fresh challenge and a failure reason, a structurally invalid one is `-32602`,
+and the upstream's `Payment-Receipt` is returned in
+`_meta["org.paymentauth/receipt"]`.
+
+```sh
+conny -d descriptor.pb --mcp http://localhost:8080
+npx @modelcontextprotocol/inspector http://localhost:8888/mcp
 ```
 
 ### Generate a descriptor
@@ -121,8 +148,9 @@ func main() {
 		Target:         "h2c://localhost:8080",
 		Protocol:       "connect",           // connect | grpc | grpcweb
 		Reflection:     true,
-		Payment:        true,
 		StaticDir:      "./public",          // optional
+		MCP:            true,
+		Payment:        true,
 	}
 
 	// Serve directly (HTTP/1 + h2c, blocks):
