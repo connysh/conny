@@ -52,9 +52,14 @@ type Config struct {
 	// method in the descriptor as a tool an agent can call. Disabled when false.
 	MCP bool
 
-	// Payment translates the upstream's Machine Payments Protocol (MPP) flow for
-	// clients that expect MPP's native shape: 402 Payment Required for REST, and
-	// the MPP MCP binding (JSON-RPC errors and _meta) for MCP tool calls.
+	// MPP translates the upstream's Machine Payments Protocol flow for clients
+	// that expect MPP's native shape: 402 Payment Required for REST, and the
+	// MPP MCP binding (JSON-RPC errors and _meta) for MCP tool calls.
+	MPP bool
+
+	// Payment is the former name of MPP and enables the same behaviour.
+	//
+	// Deprecated: set MPP instead.
 	Payment bool
 
 	// Version is reported to MCP clients as the server's version. Defaults to
@@ -131,18 +136,19 @@ func NewHandler(c Config) (http.Handler, error) {
 		}
 	})
 
-	if c.Payment {
+	mpp := c.MPP || c.Payment
+	if mpp {
 		logger.Info("translating mpp payment flow for rest and mcp clients")
 	}
 
 	if c.MCP {
-		mcpHandler, tools := newMCPHandler(files, transcoder, c.Version, c.Payment, logger)
+		mcpHandler, tools := newMCPHandler(files, transcoder, c.Version, mpp, logger)
 		mux.Handle(mcpPath, mcpHandler)
 		logger.Info("serving mcp", "path", mcpPath, "tools", tools)
 	}
 
 	var rootHandler http.Handler = transcoder
-	if c.Payment {
+	if mpp {
 		rootHandler = withPaymentRequired(transcoder)
 	}
 	if c.StaticDir != "" {

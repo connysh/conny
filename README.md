@@ -51,10 +51,11 @@ conny -d descriptor.pb h2c://localhost:8080
 | `--reflection`     | `REFLECTION` | `false` | Enable server reflection |
 | `--static`         | `STATIC`     | | Directory of static files to serve alongside the RPC routes |
 | `--mcp`            | `MCP`        | `false` | Serve an MCP endpoint at `/mcp` exposing unary RPCs as tools |
-| `--payment`        | `PAYMENT`    | `false` | Translate the upstream's [Machine Payments Protocol](https://mpp.dev) flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients |
+| `--mpp`            | `MPP`        | `false` | Translate the upstream's [Machine Payments Protocol](https://mpp.dev) flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients |
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
+`--payment` and `PAYMENT` still work as deprecated aliases of `--mpp` and `MPP`.
 
 ### Health check
 
@@ -82,21 +83,67 @@ underscores, take the request message as JSON, and are documented from its
 methods are skipped, and a caller's `Authorization` header is passed upstream.
 Calls take the same path as any other client's, so `--protocol` applies.
 
-With `--payment`, tool calls follow the
-[MPP MCP binding](https://mpp.dev/protocol/transports/mcp), so an MPP-aware
-agent can pay an upstream that charges per call without leaving MCP. An upstream
-`Payment` challenge comes back as JSON-RPC error `-32042` carrying the
-challenge; the agent retries with its credential in
-`_meta["org.paymentauth/credential"]`, which conny sends upstream as the
-`Authorization: Payment` header; a rejected credential is error `-32043` with a
-fresh challenge and a failure reason, a structurally invalid one is `-32602`,
-and the upstream's `Payment-Receipt` is returned in
-`_meta["org.paymentauth/receipt"]`.
+With `--mpp`, tool calls also follow the MPP MCP binding, so an agent can pay
+a per-call upstream without leaving MCP. See [MPP](#mpp).
 
 ```sh
 conny -d descriptor.pb --mcp http://localhost:8080
 npx @modelcontextprotocol/inspector http://localhost:8888/mcp
 ```
+
+### MPP
+
+`--mpp` translates the upstream's
+[Machine Payments Protocol](https://mpp.dev) flow for clients that expect its
+native shape. The upstream stays in charge: it prices each call, issues the
+`Payment` challenge, and verifies the credential. Conny holds no keys, keeps no
+state, and never decides whether a call is paid for.
+
+**REST clients.** gRPC and Connect have no `402`, so an MPP upstream answers an
+unpaid call with `401 Unauthenticated` plus a `WWW-Authenticate: Payment`
+challenge. Conny rewrites the status to `402 Payment Required` for REST
+callers, which is what MPP clients look for over HTTP. Headers and body pass
+through untouched, and RPC callers see the `401` unchanged, since their clients
+read the code from the body.
+
+**MCP clients.** With `--mcp`, tool calls follow the
+[MPP MCP binding](https://mpp.dev/protocol/transports/mcp):
+
+| Upstream (HTTP) | MCP client sees |
+|-----------------|-----------------|
+| `401` + `WWW-Authenticate: Payment` | JSON-RPC error `-32042` with the challenges as JSON in `error.data.challenges` |
+| `Authorization: Payment <credential>` | sent by the client as `_meta["org.paymentauth/credential"]` |
+| challenge after a credential was sent | error `-32043` with a fresh challenge and `error.data.failure.reason` |
+| `Payment-Receipt` on success | `_meta["org.paymentauth/receipt"]` on the tool result |
+
+A credential that is not an object with a `challenge.id` and a `payload` is
+rejected with `-32602` before anything reaches the upstream. A `403` without a
+challenge is a plain tool error, not a payment error: the payment was fine and
+policy denied access.
+
+```sh
+conny -d descriptor.pb --mcp --mpp http://localhost:8080
+```
+
+**Constraints.**
+
+- The upstream must speak MPP over HTTP. Conny does not price calls or verify
+  payments; gateway-side pricing is not supported.
+- The MCP client must implement the MPP binding. Hosts that don't will surface
+  `-32042` as an ordinary error.
+- Each challenge must arrive in its own `WWW-Authenticate` header with the
+  required `id`, `realm`, `method`, `intent`, and base64url `request`
+  parameters. Anything else is left as a plain error.
+- The client echoes `challenge.request` as JSON; conny re-encodes it to the
+  base64url string the upstream issued. That round-trips exactly for the flat,
+  string-valued requests MPP payment methods use.
+- `failure.reason` is inferred: from an RFC 9457 problem body if the upstream
+  sends one, else `payment-expired` when the echoed challenge has expired, else
+  `malformed-credential` on a Connect `invalid_argument`, else
+  `verification-failed`. Reasons only the upstream knows, such as
+  `payment-insufficient`, need a problem body.
+- The binding is IETF draft `draft-payment-transport-mcp-00`; its error codes
+  and `_meta` keys may still change.
 
 ### Generate a descriptor
 
@@ -150,7 +197,7 @@ func main() {
 		Reflection:     true,
 		StaticDir:      "./public",          // optional
 		MCP:            true,
-		Payment:        true,
+		MPP:            true,
 	}
 
 	// Serve directly (HTTP/1 + h2c, blocks):
