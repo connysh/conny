@@ -25,8 +25,9 @@ const mcpInstructions = "Each tool calls one unary RPC on the upstream service. 
 
 // Tool calls loop back through next — the transcoder — as Connect-unary JSON
 // requests, so they reach the upstream the way any other client's would, over the
-// configured protocol and through the same proxy.
-func newMCPHandler(files *protoregistry.Files, next http.Handler, version string, logger *slog.Logger) (http.Handler, int) {
+// configured protocol and through the same proxy. With mpp, they also speak the
+// MPP MCP binding (see mpp.go).
+func newMCPHandler(files *protoregistry.Files, next http.Handler, version string, mpp bool, logger *slog.Logger) (http.Handler, int) {
 	if version == "" {
 		version = "dev"
 	}
@@ -56,7 +57,7 @@ func newMCPHandler(files *protoregistry.Files, next http.Handler, version string
 						"method", md.FullName(), "length", len(name), "limit", maxToolNameLength)
 					continue
 				}
-				server.AddTool(newTool(md), toolHandler(md, next))
+				server.AddTool(newTool(md), toolHandler(md, next, mpp))
 				tools++
 			}
 		}
@@ -119,7 +120,7 @@ func isReadOnlyMethod(md protoreflect.MethodDescriptor) bool {
 
 // toolHandler passes arguments through without reparsing, preserving protobuf
 // JSON details such as 64-bit integers encoded as strings.
-func toolHandler(md protoreflect.MethodDescriptor, next http.Handler) mcp.ToolHandler {
+func toolHandler(md protoreflect.MethodDescriptor, next http.Handler, mpp bool) mcp.ToolHandler {
 	path := fmt.Sprintf("/%s/%s", md.Parent().FullName(), md.Name())
 
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -142,16 +143,37 @@ func toolHandler(md protoreflect.MethodDescriptor, next http.Handler) mcp.ToolHa
 			}
 		}
 
+		// A _meta credential outranks connection-level auth.
+		var credential *paymentCredential
+		if mpp {
+			var err error
+			if credential, err = parsePaymentCredential(req.Params.Meta); err != nil {
+				return nil, err
+			}
+			if credential != nil {
+				r.Header.Set(credential.header, credential.value)
+			}
+		}
+
 		w := &bufferedWriter{header: make(http.Header)}
 		next.ServeHTTP(w, r)
 
 		if w.status != http.StatusOK {
+			if mpp {
+				if err := mppChallengeError(w, credential); err != nil {
+					return nil, err
+				}
+			}
 			return toolError(w), nil
 		}
-		return &mcp.CallToolResult{
+		result := &mcp.CallToolResult{
 			Content:           []mcp.Content{&mcp.TextContent{Text: w.body.String()}},
 			StructuredContent: json.RawMessage(w.body.Bytes()),
-		}, nil
+		}
+		if mpp {
+			result.Meta = paymentReceipt(w.header)
+		}
+		return result, nil
 	}
 }
 

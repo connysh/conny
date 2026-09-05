@@ -43,10 +43,6 @@ type Config struct {
 	// Reflection enables gRPC server reflection (v1).
 	Reflection bool
 
-	// Payment upgrades REST responses to 402 Payment Required when the upstream
-	// returns a 401 carrying a "Payment" WWW-Authenticate challenge.
-	Payment bool
-
 	// StaticDir is a directory served alongside the RPC routes — for a
 	// pre-generated openapi.json, a docs UI, and the like. Requests that do not
 	// name a file in it fall through to the transcoder. Disabled when empty.
@@ -55,6 +51,16 @@ type Config struct {
 	// MCP serves a Model Context Protocol endpoint at /mcp, exposing each unary
 	// method in the descriptor as a tool an agent can call. Disabled when false.
 	MCP bool
+
+	// MPP translates the upstream's Machine Payments Protocol flow for clients
+	// that expect MPP's native shape: 402 Payment Required for REST, and the
+	// MPP MCP binding (JSON-RPC errors and _meta) for MCP tool calls.
+	MPP bool
+
+	// Payment is the former name of MPP and enables the same behaviour.
+	//
+	// Deprecated: set MPP instead.
+	Payment bool
 
 	// Version is reported to MCP clients as the server's version. Defaults to
 	// "dev" when empty.
@@ -130,14 +136,19 @@ func NewHandler(c Config) (http.Handler, error) {
 		}
 	})
 
+	mpp := c.MPP || c.Payment
+	if mpp {
+		logger.Info("translating mpp payment flow for rest and mcp clients")
+	}
+
 	if c.MCP {
-		mcpHandler, tools := newMCPHandler(files, transcoder, c.Version, logger)
+		mcpHandler, tools := newMCPHandler(files, transcoder, c.Version, mpp, logger)
 		mux.Handle(mcpPath, mcpHandler)
 		logger.Info("serving mcp", "path", mcpPath, "tools", tools)
 	}
 
 	var rootHandler http.Handler = transcoder
-	if c.Payment {
+	if mpp {
 		rootHandler = withPaymentRequired(transcoder)
 	}
 	if c.StaticDir != "" {

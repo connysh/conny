@@ -37,7 +37,7 @@ func TestToolNameOverLimitIsSkipped(t *testing.T) {
 		t.Fatalf("the fixture's name is %d bytes, too short to exercise the limit", len(name))
 	}
 
-	_, tools := newMCPHandler(files, http.NotFoundHandler(), "test", quietLogger())
+	_, tools := newMCPHandler(files, http.NotFoundHandler(), "test", false, quietLogger())
 	if tools != 0 {
 		t.Errorf("tools = %d, want 0", tools)
 	}
@@ -293,7 +293,7 @@ func TestMCPNoUnaryMethods(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler, tools := newMCPHandler(files, http.NotFoundHandler(), "test", quietLogger())
+	handler, tools := newMCPHandler(files, http.NotFoundHandler(), "test", false, quietLogger())
 	if tools != 0 {
 		t.Errorf("tools = %d, want 0", tools)
 	}
@@ -366,6 +366,7 @@ func TestMCPDisabledByDefault(t *testing.T) {
 type stubTranscoder struct {
 	status      int
 	body        string
+	header      http.Header
 	request     *http.Request
 	requestBody string
 }
@@ -385,15 +386,23 @@ func (s *stubTranscoder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	for name, values := range s.header {
+		w.Header()[name] = values
+	}
 	w.WriteHeader(s.status)
 	_, _ = w.Write([]byte(s.body))
 }
 
 func mcpTestHandler(t *testing.T) (http.Handler, *stubTranscoder) {
 	t.Helper()
+	return mcpTestHandlerWithMPP(t, false)
+}
+
+func mcpTestHandlerWithMPP(t *testing.T, mpp bool) (http.Handler, *stubTranscoder) {
+	t.Helper()
 
 	upstream := &stubTranscoder{status: http.StatusOK, body: `{"id":"thing_1"}`}
-	handler, tools := newMCPHandler(testFiles(t), upstream, "test", quietLogger())
+	handler, tools := newMCPHandler(testFiles(t), upstream, "test", mpp, quietLogger())
 	if tools != 2 {
 		t.Fatalf("tools = %d, want 2", tools)
 	}
@@ -401,6 +410,17 @@ func mcpTestHandler(t *testing.T) (http.Handler, *stubTranscoder) {
 }
 
 func callMCP(t *testing.T, handler http.Handler, body string) json.RawMessage {
+	t.Helper()
+
+	result, rpcErr := callMCPRaw(t, handler, body)
+	if rpcErr != nil {
+		t.Fatalf("jsonrpc error: %s", rpcErr)
+	}
+	return result
+}
+
+// callMCPRaw returns the JSON-RPC result and error, exactly one of which is set.
+func callMCPRaw(t *testing.T, handler http.Handler, body string) (result, rpcErr json.RawMessage) {
 	t.Helper()
 
 	request := httptest.NewRequest(http.MethodPost, mcpPath, strings.NewReader(body))
@@ -420,10 +440,7 @@ func callMCP(t *testing.T, handler http.Handler, body string) json.RawMessage {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decoding %s: %v", recorder.Body, err)
 	}
-	if response.Error != nil {
-		t.Fatalf("jsonrpc error: %s", response.Error)
-	}
-	return response.Result
+	return response.Result, response.Error
 }
 
 func quietLogger() *slog.Logger {
