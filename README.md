@@ -65,7 +65,7 @@ The backend URL can also be set via the `URL` environment variable.
 
 `--static <dir>` serves files alongside the RPC routes — a pre-generated
 `openapi.json`, a docs page, a favicon. Requests that don't name a file fall
-through to the transcoder, so RPCs are unaffected. Dot-prefixed names and
+through to the RPC routes, so RPCs are unaffected. Dot-prefixed names and
 directories without an `index.html` are never served.
 
 ```sh

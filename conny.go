@@ -16,10 +16,14 @@ import (
 	"os"
 	"strings"
 
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	"connectrpc.com/connect/v2/connectproto"
 	"connectrpc.com/vanguard"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 // Config describes a conny gateway. A descriptor (Descriptor or
@@ -40,12 +44,12 @@ type Config struct {
 	// ("grpc-web" is also accepted). Defaults to "connect" when empty.
 	Protocol string
 
-	// Reflection enables gRPC server reflection (v1).
+	// Reflection enables gRPC server reflection (v1 and v1alpha).
 	Reflection bool
 
 	// StaticDir is a directory served alongside the RPC routes — for a
 	// pre-generated openapi.json, a docs UI, and the like. Requests that do not
-	// name a file in it fall through to the transcoder. Disabled when empty.
+	// name a file in it fall through to the RPC routes. Disabled when empty.
 	StaticDir string
 
 	// MCP serves a Model Context Protocol endpoint at /mcp, exposing each unary
@@ -78,7 +82,7 @@ func (c Config) logger() *slog.Logger {
 }
 
 // NewHandler builds the gateway's http.Handler — /health, any static files, an
-// MCP endpoint at /mcp when enabled, plus the transcoder —
+// MCP endpoint at /mcp when enabled, plus the RPC and REST routes —
 // for mounting in your own server or middleware stack. To accept gRPC or h2c
 // clients, enable unencrypted HTTP/2 on your server (see [ListenAndServe]).
 func NewHandler(c Config) (http.Handler, error) {
@@ -100,28 +104,22 @@ func NewHandler(c Config) (http.Handler, error) {
 		return nil, err
 	}
 
-	proto, err := parseProtocol(c.Protocol)
+	protocol, err := parseProtocol(c.Protocol)
 	if err != nil {
 		return nil, err
 	}
 
-	services, err := buildServices(files, target, proto, c.Reflection, enableH2C, logger)
+	types := dynamicpb.NewTypes(files)
+	upstream := newUpstreamClient(target, protocol, types, enableH2C, logger)
+	server, services, err := newServer(files, types, upstream, c.Reflection, logger)
 	if err != nil {
 		return nil, err
 	}
-	logger.Info("registered services", "count", len(services))
+	logger.Info("registered services", "count", services)
 
-	transcoder, err := vanguard.NewTranscoder(services,
-		vanguard.WithCodec(func(res vanguard.TypeResolver) vanguard.Codec {
-			codec := vanguard.NewJSONCodec(res)
-			codec.MarshalOptions.UseProtoNames = true
-			codec.MarshalOptions.EmitUnpopulated = true
-			codec.UnmarshalOptions.DiscardUnknown = true
-			return codec
-		}),
-	)
+	rpc, err := newRPCHandler(server, types)
 	if err != nil {
-		return nil, fmt.Errorf("conny: creating transcoder: %w", err)
+		return nil, err
 	}
 
 	mux := http.NewServeMux()
@@ -142,14 +140,14 @@ func NewHandler(c Config) (http.Handler, error) {
 	}
 
 	if c.MCP {
-		mcpHandler, tools := newMCPHandler(files, transcoder, c.Version, mpp, logger)
+		mcpHandler, tools := newMCPHandler(files, rpc, c.Version, mpp, logger)
 		mux.Handle(mcpPath, mcpHandler)
 		logger.Info("serving mcp", "path", mcpPath, "tools", tools)
 	}
 
-	var rootHandler http.Handler = transcoder
+	rootHandler := rpc
 	if mpp {
-		rootHandler = withPaymentRequired(transcoder)
+		rootHandler = withPaymentRequired(rpc)
 	}
 	if c.StaticDir != "" {
 		rootHandler, err = withStatic(c.StaticDir, rootHandler)
@@ -211,16 +209,48 @@ func (c Config) resolveTarget() (*url.URL, bool, error) {
 	return target, enableH2C, nil
 }
 
-func parseProtocol(protocol string) (vanguard.Protocol, error) {
+// newRPCHandler serves server over Connect, gRPC, and gRPC-Web, and over REST
+// for methods with google.api.http annotations. RPC messages keep connecthttp's
+// per-message read limit. REST bodies are uncapped, because vanguard limits a
+// whole body, not a chunk, and a cap would break streaming HttpBody uploads.
+func newRPCHandler(server *connect.Server, types *dynamicpb.Types) (http.Handler, error) {
+	mux := http.NewServeMux()
+
+	jsonCodec := connectproto.NewJSONCodec(connectproto.WithTypeResolver(types))
+	jsonCodec.UnmarshalOptions.DiscardUnknown = true
+	connecthttp.Mount(mux, server,
+		connecthttp.WithCodecs(connectproto.NewBinaryCodec(connectproto.WithTypeResolver(types)), jsonCodec),
+	)
+
+	err := vanguard.Mount(mux, server,
+		vanguard.WithTypeResolver(types),
+		vanguard.WithCodec(func(res connectproto.TypeResolver) vanguard.RESTCodec {
+			codec := vanguard.NewJSONCodec(res)
+			codec.MarshalOptions.UseProtoNames = true
+			codec.MarshalOptions.EmitUnpopulated = true
+			codec.UnmarshalOptions.DiscardUnknown = true
+			return codec
+		}),
+		vanguard.WithDiscardUnknownQueryParams(true),
+		vanguard.WithMaxReadBytes(0),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("conny: mounting rest routes: %w", err)
+	}
+	return mux, nil
+}
+
+// parseProtocol normalizes protocol to one of connect's protocol names.
+func parseProtocol(protocol string) (string, error) {
 	switch protocol {
 	case "", "connect":
-		return vanguard.ProtocolConnect, nil
+		return connect.ProtocolNameConnect, nil
 	case "grpc":
-		return vanguard.ProtocolGRPC, nil
+		return connect.ProtocolNameGRPC, nil
 	case "grpcweb", "grpc-web":
-		return vanguard.ProtocolGRPCWeb, nil
+		return connect.ProtocolNameGRPCWeb, nil
 	default:
-		return 0, fmt.Errorf("conny: invalid protocol %q (must be connect, grpc, or grpcweb)", protocol)
+		return "", fmt.Errorf("conny: invalid protocol %q (must be connect, grpc, or grpcweb)", protocol)
 	}
 }
 

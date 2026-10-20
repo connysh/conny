@@ -23,7 +23,7 @@ const mcpInstructions = "Each tool calls one unary RPC on the upstream service. 
 	"A tool is named for its method's full proto name with dots replaced by " +
 	"underscores, and takes that method's request message as JSON."
 
-// Tool calls loop back through next — the transcoder — as Connect-unary JSON
+// Tool calls loop back through next — the RPC handler — as Connect-unary JSON
 // requests, so they reach the upstream the way any other client's would, over the
 // configured protocol and through the same proxy. With mpp, they also speak the
 // MPP MCP binding (see mpp.go).
@@ -200,8 +200,8 @@ func toolError(w *bufferedWriter) *mcp.CallToolResult {
 	}
 }
 
-// bufferedWriter collects a response in memory. It must implement http.Flusher:
-// the transcoder refuses to serve a request whose writer cannot flush.
+// bufferedWriter collects a response in memory. It implements http.Flusher,
+// which connecthttp requires of any writer serving a stream.
 type bufferedWriter struct {
 	header http.Header
 	body   bytes.Buffer

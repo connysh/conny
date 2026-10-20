@@ -46,7 +46,7 @@ func withPaymentRequired(next http.Handler) http.Handler {
 
 // isRPCRequest reports whether the request arrived over gRPC, gRPC-Web, or
 // Connect rather than as a plain REST/HTTP call. The Connect markers match
-// vanguard's classifyRequest; they are the only thing distinguishing
+// connecthttp's request classification; they are the only thing distinguishing
 // Connect-unary from REST, which share the application/json content type.
 func isRPCRequest(r *http.Request) bool {
 	if r.Header.Get("Connect-Protocol-Version") == "1" || r.URL.Query().Get("connect") == "v1" {
@@ -80,8 +80,8 @@ func (w *paymentRequiredWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-// Flush and Unwrap expose the underlying writer's capabilities; the transcoder
-// requires the response writer to implement http.Flusher.
+// Flush and Unwrap expose the underlying writer's capabilities; streaming RPCs
+// require the response writer to implement http.Flusher.
 func (w *paymentRequiredWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()

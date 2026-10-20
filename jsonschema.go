@@ -60,7 +60,7 @@ func messageSchema(md protoreflect.MessageDescriptor, expanding map[protoreflect
 	schema := map[string]any{
 		"type":       "object",
 		"properties": properties,
-		// The transcoder discards unknown fields, so an invented one would fail
+		// The gateway discards unknown fields, so an invented one would fail
 		// silently. Closing the object turns that into a visible error.
 		"additionalProperties": false,
 	}
