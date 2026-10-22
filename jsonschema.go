@@ -249,9 +249,9 @@ func fieldRules(fd protoreflect.FieldDescriptor) *validate.FieldRules {
 func stringInValues(fd protoreflect.FieldDescriptor) []string {
 	rules := fieldRules(fd)
 	if fd.IsList() {
-		return rules.GetRepeated().GetItems().GetString_().GetIn()
+		return rules.GetRepeated().GetItems().GetString().GetIn()
 	}
-	return rules.GetString_().GetIn()
+	return rules.GetString().GetIn()
 }
 
 // comment returns the leading .proto comment for d, empty without source info.
