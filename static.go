@@ -10,13 +10,9 @@ import (
 )
 
 // withStatic serves files from dir, falling through to next for any request
-// that does not name a file. This lets a pre-generated openapi.json — or a
-// docs UI, favicon, .well-known file — sit alongside the RPC routes without
-// conny having to generate anything itself.
-//
-// Requests are confined to dir by [os.Root]; dot-prefixed names (.env, .git,
-// and Kubernetes' ..data volume internals) are never served; and a directory
-// without an index.html falls through rather than producing a listing.
+// that does not name a file. Requests are confined to dir by [os.Root],
+// dot-prefixed names (.env, .git, Kubernetes' ..data) are never served, and a
+// directory without an index.html falls through rather than being listed.
 func withStatic(dir string, next http.Handler) (http.Handler, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -70,9 +66,8 @@ func staticFileExists(fsys fs.FS, urlPath string) bool {
 	return info.Mode().IsRegular()
 }
 
-// hasDotPrefixedElement reports whether any path element starts with a dot.
-// http.FileServer would happily serve .env or .git/HEAD, so screen them out
-// before touching the filesystem.
+// hasDotPrefixedElement reports whether any path element starts with a dot,
+// which http.FileServer would otherwise serve.
 func hasDotPrefixedElement(name string) bool {
 	for elem := range strings.SplitSeq(name, "/") {
 		if strings.HasPrefix(elem, ".") {

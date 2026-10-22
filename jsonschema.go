@@ -15,10 +15,9 @@ import (
 // unbounded walk would not terminate.
 const maxSchemaDepth = 10
 
-// requestSchema describes md as a JSON Schema object for use as a tool's input
-// schema. MCP requires an object at the top level, so a request message that
-// protobuf JSON encodes as something else — a bare string, for a Timestamp — gets
-// an open object instead of a schema clients would reject.
+// requestSchema describes md as a tool's input schema. MCP requires a top-level
+// object, so a message that encodes as something else (a Timestamp's string)
+// gets an open object instead.
 func requestSchema(md protoreflect.MessageDescriptor) map[string]any {
 	schema := messageSchema(md, map[protoreflect.FullName]bool{}, 0)
 	if schema["type"] != "object" {
@@ -233,10 +232,8 @@ func oneofNote(od protoreflect.OneofDescriptor) string {
 	return fmt.Sprintf("part of oneof %q: set at most one of %s", od.Name(), strings.Join(names, ", "))
 }
 
-// fieldRules returns fd's buf.validate constraints, or nil if it has none —
-// either because the descriptor set never imported buf/validate/validate.proto,
-// or because this particular field carries no (buf.validate.field) option. Its
-// getters are nil-receiver-safe, so callers use it directly (fieldRules(fd).GetRequired()).
+// fieldRules returns fd's buf.validate constraints, or nil if it has none. The
+// getters are nil-safe, so callers chain directly: fieldRules(fd).GetRequired().
 func fieldRules(fd protoreflect.FieldDescriptor) *validate.FieldRules {
 	options, ok := fd.Options().(*descriptorpb.FieldOptions)
 	if !ok || options == nil {
@@ -257,9 +254,8 @@ func stringInValues(fd protoreflect.FieldDescriptor) []string {
 	return rules.GetString_().GetIn()
 }
 
-// comment returns the leading .proto comment for d, empty when the descriptor set
-// carries no source info. Every line arrives with the space that followed its
-// "//", so each is trimmed rather than just the block.
+// comment returns the leading .proto comment for d, empty without source info.
+// Each line keeps the space after its "//", so lines are trimmed one by one.
 func comment(d protoreflect.Descriptor) string {
 	file := d.ParentFile()
 	if file == nil {

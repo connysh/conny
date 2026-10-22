@@ -14,11 +14,9 @@ import (
 )
 
 // The Machine Payments Protocol (MPP) is a challenge–credential–receipt flow over
-// HTTP headers. gRPC/Connect have no 402, so an upstream signals the challenge as
-// 401 Unauthenticated plus the header, and conny translates for clients that
-// expect MPP's own shape: 402 for REST, and for MCP the binding in
-// draft-payment-transport-mcp-00, where the challenge is a JSON-RPC error and the
-// credential and receipt travel in _meta. Enabled by Config.MPP.
+// HTTP headers. gRPC/Connect have no 402, so the upstream answers 401 plus a
+// Payment challenge, and conny translates it: to 402 for REST, and for MCP to
+// draft-payment-transport-mcp-00 (JSON-RPC errors, credential and receipt in _meta).
 
 // ---- REST clients ----
 
@@ -44,10 +42,9 @@ func withPaymentRequired(next http.Handler) http.Handler {
 	})
 }
 
-// isRPCRequest reports whether the request arrived over gRPC, gRPC-Web, or
-// Connect rather than as a plain REST/HTTP call. The Connect markers match
-// connecthttp's request classification; they are the only thing distinguishing
-// Connect-unary from REST, which share the application/json content type.
+// isRPCRequest reports whether the request is gRPC, gRPC-Web, or Connect rather
+// than REST. The Connect markers match connecthttp's; they are all that tells
+// Connect-unary from REST, as both use application/json.
 func isRPCRequest(r *http.Request) bool {
 	if r.Header.Get("Connect-Protocol-Version") == "1" || r.URL.Query().Get("connect") == "v1" {
 		return true
@@ -179,10 +176,9 @@ func malformedCredential(detail string) error {
 	}
 }
 
-// mppChallengeError builds the JSON-RPC error for a response carrying Payment
-// challenges (one per WWW-Authenticate header), or nil if it carries none. A
-// challenge answering a credential means it was rejected, which gets its own
-// code so the client re-pays rather than resubmitting.
+// mppChallengeError builds the JSON-RPC error for a response's Payment
+// challenges, or nil if there are none. A challenge answering a credential means
+// it was rejected, which gets its own code so the client re-pays.
 func mppChallengeError(w *bufferedWriter, credential *paymentCredential) error {
 	var challenges []map[string]any
 	for _, value := range w.header.Values("Www-Authenticate") {

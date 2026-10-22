@@ -103,8 +103,7 @@ func newTool(md protoreflect.MethodDescriptor) *mcp.Tool {
 }
 
 // isReadOnlyMethod reports whether md is bound to HTTP GET by a google.api.http
-// annotation — the one machine-readable claim in a descriptor that a method only
-// reads. Methods without the annotation are left unmarked rather than guessed at.
+// annotation, the only machine-readable sign that a method just reads.
 func isReadOnlyMethod(md protoreflect.MethodDescriptor) bool {
 	options, ok := md.Options().(*descriptorpb.MethodOptions)
 	if !ok || options == nil {
