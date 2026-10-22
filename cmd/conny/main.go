@@ -23,7 +23,6 @@ func main() {
 		usageStatic     = "directory of static files to serve alongside the RPC routes (e.g. a pre-generated openapi.json)"
 		usageMCP        = "serve an MCP endpoint at /mcp exposing unary RPCs as tools"
 		usageMPP        = "translate the upstream's Machine Payments Protocol flow: HTTP 402 for REST clients, the MPP MCP binding for MCP clients (not to be confused with --mcp)"
-		usagePayment    = "deprecated alias of --mpp"
 	)
 
 	var version bool
@@ -60,9 +59,6 @@ func main() {
 	defaultMPP := envOrDefaultBool("MPP", false)
 	flag.BoolVar(&enableMPP, "mpp", defaultMPP, usageMPP)
 
-	var enablePayment bool
-	flag.BoolVar(&enablePayment, "payment", envOrDefaultBool("PAYMENT", false), usagePayment)
-
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Conny: A tiny ConnectRPC gateway\n\nUsage: conny -d <descriptor.pb> [flags] <url>\n\nFlags:\n")
 		fmt.Fprintf(os.Stderr, "  -d, --descriptor string\n        %s\n", usageDescriptor)
@@ -79,11 +75,6 @@ func main() {
 	if version {
 		fmt.Println(Version)
 		os.Exit(0)
-	}
-
-	if enablePayment {
-		slog.Warn("--payment and PAYMENT are deprecated; use --mpp and MPP")
-		enableMPP = true
 	}
 
 	rawURL := flag.Arg(0)

@@ -61,11 +61,6 @@ type Config struct {
 	// MPP MCP binding (JSON-RPC errors and _meta) for MCP tool calls.
 	MPP bool
 
-	// Payment is the former name of MPP and enables the same behaviour.
-	//
-	// Deprecated: set MPP instead.
-	Payment bool
-
 	// Version is reported to MCP clients as the server's version. Defaults to
 	// "dev" when empty.
 	Version string
@@ -134,19 +129,18 @@ func NewHandler(c Config) (http.Handler, error) {
 		}
 	})
 
-	mpp := c.MPP || c.Payment
-	if mpp {
+	if c.MPP {
 		logger.Info("translating mpp payment flow for rest and mcp clients")
 	}
 
 	if c.MCP {
-		mcpHandler, tools := newMCPHandler(files, rpc, c.Version, mpp, logger)
+		mcpHandler, tools := newMCPHandler(files, rpc, c.Version, c.MPP, logger)
 		mux.Handle(mcpPath, mcpHandler)
 		logger.Info("serving mcp", "path", mcpPath, "tools", tools)
 	}
 
 	rootHandler := rpc
-	if mpp {
+	if c.MPP {
 		rootHandler = withPaymentRequired(rpc)
 	}
 	if c.StaticDir != "" {
