@@ -55,7 +55,6 @@ conny -d descriptor.pb h2c://localhost:8080
 | `-v, --version`    | | | Print version |
 
 The backend URL can also be set via the `URL` environment variable.
-`--payment` and `PAYMENT` still work as deprecated aliases of `--mpp` and `MPP`.
 
 ### Health check
 
